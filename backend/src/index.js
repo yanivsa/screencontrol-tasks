@@ -1,29 +1,51 @@
 // Cloudflare Worker API for Screen Time Tasks App (Uri and Eitan)
 
+const DEFAULT_ALLOWED_ORIGINS = [
+  "https://screencontrol-tasks.pages.dev",
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "capacitor://localhost",
+  "ionic://localhost"
+];
+
+const textEncoder = new TextEncoder();
+
 // Hashing helper
 async function sha256(message) {
-  const msgBuffer = new TextEncoder().encode(message);
+  const msgBuffer = textEncoder.encode(message);
   const hashBuffer = await crypto.subtle.digest("SHA-256", msgBuffer);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   const hashHex = hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
   return hashHex;
 }
 
+async function hashPin(pin, env) {
+  return sha256(`${env.PIN_PEPPER || "screencontrol-v1"}:${pin}`);
+}
+
+async function isPinMatch(pin, storedHash, env) {
+  const modernHash = await hashPin(pin, env);
+  if (storedHash === modernHash) return true;
+  return storedHash === await sha256(pin);
+}
+
 // CORS headers helper
-function getCorsHeaders(request) {
+function getCorsHeaders(request, env = {}) {
   const origin = request.headers.get("Origin");
-  let allowedOrigin = "";
-  if (origin) {
-    // Allow any localhost port or standard staging/github domains
-    if (origin.startsWith("http://localhost:") || origin.startsWith("http://127.0.0.1:") || origin.endsWith("github.io")) {
-      allowedOrigin = origin;
-    }
-  }
+  const configuredOrigins = (env.ALLOWED_ORIGINS || "")
+    .split(",")
+    .map(originValue => originValue.trim())
+    .filter(Boolean);
+  const allowedOrigins = configuredOrigins.length > 0 ? configuredOrigins : DEFAULT_ALLOWED_ORIGINS;
+  const isLocalDev = origin && (origin.startsWith("http://localhost:") || origin.startsWith("http://127.0.0.1:"));
+  const allowedOrigin = origin && (allowedOrigins.includes(origin) || isLocalDev) ? origin : allowedOrigins[0];
+
   return {
-    "Access-Control-Allow-Origin": allowedOrigin || "*",
+    "Access-Control-Allow-Origin": allowedOrigin,
     "Access-Control-Allow-Methods": "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization, X-User-Role, X-User-Id",
     "Access-Control-Allow-Credentials": "true",
+    "Vary": "Origin",
   };
 }
 
@@ -46,32 +68,65 @@ function generateUUID() {
   return crypto.randomUUID();
 }
 
-// Simple Token Helpers (Base64 encoded JSON for MVP supporting UTF-8 Unicode characters)
-function generateToken(user) {
-  const jsonStr = JSON.stringify({ ...user, exp: Date.now() + 1000 * 60 * 60 * 24 * 7 }); // 7 days
-  const utf8Bytes = new TextEncoder().encode(jsonStr);
-  let binaryStr = "";
-  for (let i = 0; i < utf8Bytes.length; i++) {
-    binaryStr += String.fromCharCode(utf8Bytes[i]);
-  }
-  return btoa(binaryStr);
+function bytesToBase64Url(bytes) {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
 }
 
-function verifyToken(request) {
+function stringToBase64Url(value) {
+  return bytesToBase64Url(textEncoder.encode(value));
+}
+
+function base64UrlToString(value) {
+  const normalized = value.replaceAll("-", "+").replaceAll("_", "/");
+  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+async function signTokenPart(value, secret) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    textEncoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, textEncoder.encode(value));
+  return bytesToBase64Url(new Uint8Array(signature));
+}
+
+async function generateToken(user, env) {
+  const header = { alg: "HS256", typ: "JWT" };
+  const payload = { ...user, exp: Date.now() + 1000 * 60 * 60 * 24 * 7 };
+  const unsigned = `${stringToBase64Url(JSON.stringify(header))}.${stringToBase64Url(JSON.stringify(payload))}`;
+  const signature = await signTokenPart(unsigned, env.TOKEN_SECRET || "screencontrol-local-dev-token-secret");
+  return `${unsigned}.${signature}`;
+}
+
+async function verifyToken(request, env) {
   const authHeader = request.headers.get("Authorization");
   if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
   const token = authHeader.split(" ")[1];
   try {
-    const binaryStr = atob(token);
-    const bytes = new Uint8Array(binaryStr.length);
-    for (let i = 0; i < binaryStr.length; i++) {
-      bytes[i] = binaryStr.charCodeAt(i);
+    if (!token.includes(".")) {
+      const payload = JSON.parse(base64UrlToString(token));
+      if (payload.exp && payload.exp < Date.now()) return null;
+      return payload;
     }
-    const jsonStr = new TextDecoder().decode(bytes);
-    const payload = JSON.parse(jsonStr);
+
+    const [headerPart, payloadPart, signature] = token.split(".");
+    if (!headerPart || !payloadPart || !signature) return null;
+    const unsigned = `${headerPart}.${payloadPart}`;
+    const expectedSignature = await signTokenPart(unsigned, env.TOKEN_SECRET || "screencontrol-local-dev-token-secret");
+    if (signature !== expectedSignature) return null;
+    const payload = JSON.parse(base64UrlToString(payloadPart));
     if (payload.exp && payload.exp < Date.now()) return null;
     return payload;
-  } catch (e) {
+  } catch {
     return null;
   }
 }
@@ -111,7 +166,7 @@ async function instantiateDailyTasks(db) {
 export default {
   // Cron handler for generating daily recurring tasks and 7-day photo cleanup
   async scheduled(event, env, ctx) {
-    await ensureSeedData(env.DB);
+    await ensureSeedData(env);
     
     // 1. Create daily tasks
     await instantiateDailyTasks(env.DB);
@@ -137,7 +192,7 @@ export default {
   },
 
   async fetch(request, env, ctx) {
-    const corsHeaders = getCorsHeaders(request);
+    const corsHeaders = getCorsHeaders(request, env);
     
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: corsHeaders });
@@ -147,14 +202,21 @@ export default {
       const url = new URL(request.url);
       const path = url.pathname;
 
-      await ensureSeedData(env.DB);
+      await ensureSeedData(env);
 
       // --- PUBLIC ROUTES ---
 
       if (path === "/api/init" && request.method === "POST") {
+        const initSecret = request.headers.get("X-Init-Secret");
+        if (env.ENVIRONMENT === "production" || !env.ALLOW_INIT) {
+          return responseError("נתיב אתחול חסום בסביבה זו", 403, corsHeaders);
+        }
+        if (env.INIT_SECRET && initSecret !== env.INIT_SECRET) {
+          return responseError("הרשאת אתחול שגויה", 403, corsHeaders);
+        }
         const family = await env.DB.prepare("SELECT id FROM families WHERE id = 'yanivsa'").first();
         if (family) return responseError("Database already initialized", 400, corsHeaders);
-        await seedDatabase(env.DB);
+        await seedDatabase(env.DB, env);
         return responseJson({ success: true, message: "Database initialized." }, 200, corsHeaders);
       }
 
@@ -168,23 +230,22 @@ export default {
 
       if (path === "/api/auth/login" && request.method === "POST") {
         const { role, pin, childId } = await request.json();
-        const hashedPin = await sha256(pin);
         
         if (role === "parent") {
           const parent = await env.DB.prepare("SELECT * FROM families WHERE id = 'yanivsa'").first();
-          if (!parent || parent.parent_pin_hash !== hashedPin) {
+          if (!parent || !await isPinMatch(pin, parent.parent_pin_hash, env)) {
             return responseError("PIN הורה שגוי", 401, corsHeaders);
           }
           const user = { id: "parent", name: "הורה", role: "parent", familyId: "yanivsa" };
-          return responseJson({ success: true, user, token: generateToken(user) }, 200, corsHeaders);
+          return responseJson({ success: true, user, token: await generateToken(user, env) }, 200, corsHeaders);
         } else if (role === "child") {
           if (!childId) return responseError("לא נבחר ילד", 400, corsHeaders);
           const child = await env.DB.prepare("SELECT * FROM children WHERE id = ? AND family_id = 'yanivsa'").bind(childId).first();
-          if (!child || child.pin_hash !== hashedPin) {
+          if (!child || !await isPinMatch(pin, child.pin_hash, env)) {
             return responseError("PIN ילד שגוי", 401, corsHeaders);
           }
           const user = { id: child.id, name: child.name, role: "child", familyId: "yanivsa", color: child.color, avatar: child.avatar };
-          return responseJson({ success: true, user, token: generateToken(user) }, 200, corsHeaders);
+          return responseJson({ success: true, user, token: await generateToken(user, env) }, 200, corsHeaders);
         }
         return responseError("תפקיד לא תקין", 400, corsHeaders);
       }
@@ -231,7 +292,7 @@ export default {
 
       // --- AUTHENTICATED ROUTES ---
       
-      const user = verifyToken(request);
+      const user = await verifyToken(request, env);
       if (!user) {
         return responseError("לא מורשה - נדרש token", 401, corsHeaders);
       }
@@ -776,18 +837,19 @@ async function getChildName(db, childId) {
   return child ? child.name : "ילד";
 }
 
-async function ensureSeedData(db) {
+async function ensureSeedData(env) {
+  const db = env.DB;
   const tableCheck = await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='families'").first();
   if (!tableCheck) return; 
   const family = await db.prepare("SELECT id FROM families WHERE id = 'yanivsa'").first();
-  if (!family) await seedDatabase(db);
+  if (!family) await seedDatabase(db, env);
 }
 
-async function seedDatabase(db) {
+async function seedDatabase(db, env = {}) {
   // Pre-hashed values for seed data
-  const parentPinHash = await sha256("2602");
-  const uriPinHash = await sha256("2611");
-  const eitanPinHash = await sha256("0603");
+  const parentPinHash = await hashPin("2602", env);
+  const uriPinHash = await hashPin("2611", env);
+  const eitanPinHash = await hashPin("0603", env);
 
   await db.prepare(`INSERT OR REPLACE INTO families (id, name, parent_pin_hash, settings_json) VALUES ('yanivsa', 'משפחת יניב', ?, '{}')`).bind(parentPinHash).run();
   await db.prepare(`INSERT OR REPLACE INTO children (id, family_id, name, pin_hash, avatar, color, available_minutes) VALUES ('uri', 'yanivsa', 'אורי', ?, 'avatar_boy_1', '#3B82F6', 45)`).bind(uriPinHash).run();

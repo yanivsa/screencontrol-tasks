@@ -7,7 +7,17 @@ binding = "DB"
 database_name = "screen_tasks_db"
 database_id = "427f12bb-1bca-47ed-825d-624ee0ed0f13"
 
+# R2 is intentionally disabled until R2 is enabled in the Cloudflare account.
+# The Worker stores photo proof in D1 as a fallback when PHOTOS is not bound.
+# After enabling R2, uncomment this binding and deploy again:
+# [[r2_buckets]]
+# binding = "PHOTOS"
+# bucket_name = "screen-tasks-photos"
+# preview_bucket_name = "screen-tasks-photos"
 
+[vars]
+ENVIRONMENT = "production"
+ALLOWED_ORIGINS = "https://screencontrol-tasks.pages.dev,capacitor://localhost,ionic://localhost,http://localhost:5173,http://127.0.0.1:5173"
 
 [triggers]
 crons = ["0 3 * * *"]

@@ -1136,13 +1136,13 @@ Config:
 
 ## 22. חיתוך מצב פיתוח
 
-סטטוס נכון לעכשיו: האפליקציה התקדמה משמעותית והיא כבר אבטיפוס פונקציונלי טוב, אבל היא עדיין לא בשלה להעלאה ל-Google Play Store.
+סטטוס נכון לעכשיו: האפליקציה בשלה כמעט לחלוטין ל-Internal Testing ב-Google Play. היא עדיין לא 100% production בגלל חסם חיצוני של R2 שלא הופעל בחשבון Cloudflare ובגלל שלא בוצעה התקנה על מכשיר Android אמיתי דרך Play Console.
 
-הערכת ביצוע כוללת: 70%.
+הערכת ביצוע כוללת: 99%.
 
-הערכת מוכנות ל-Google Play Store: 45%.
+הערכת מוכנות ל-Google Play Store Internal Testing: 95%.
 
-הסיבה לפער: ברמת מוצר ותכונות הליבה יש התקדמות טובה, אבל עדיין אין הוכחת Android build חתום, אין AAB release, אין פריסה אמיתית ל-Cloudflare, ואין סט בדיקות שמוכיח שהמערכת יציבה ובטוחה לשימוש משפחתי אמיתי.
+הסיבה לפער שנותר: Cloudflare Pages + Worker + D1 חיים בפרודקשן, ה-Frontend פרוס, ה-Worker פרוס, ויש AAB חתום. תמונות אומתו בפרודקשן דרך fallback ל-D1, אבל R2 עצמו לא אומת כי Cloudflare דורש להפעיל R2 בחשבון דרך ה-Dashboard. בנוסף עדיין חסרה בדיקת התקנה על מכשיר Android אמיתי ופתיחת Internal Testing ב-Play Console.
 
 ### מה בוצע בפועל
 
@@ -1160,88 +1160,81 @@ Config:
 - Frontend משתמש ב-`VITE_API_BASE` עם fallback ל-localhost.
 - נוספו נכסי דמויות/אוואטרים לאורי, איתן והורה.
 - נוצר פרויקט Android תחת `frontend/android` באמצעות Capacitor.
+- Cloudflare Pages חי ב-`https://screencontrol-tasks.pages.dev/`.
+- ה-Frontend בפרודקשן מצביע ל-`https://screen-tasks-backend.yanivsa.workers.dev` ולא ל-localhost.
+- Cloudflare Worker חי ב-`https://screen-tasks-backend.yanivsa.workers.dev/`.
+- התחברות הורה בפרודקשן עם PIN `2602` עובדת.
+- התחברות אורי עם PIN `2611` ואיתן עם PIN `0603` עובדת בפרודקשן.
+- API מאומת בפרודקשן עובד עבור `/api/children`, `/api/tasks`, `/api/screen-time-requests`, ו-`/api/dashboard/stats`.
+- D1 בפרודקשן פעיל בפועל: ה-Worker מחזיר ילדים, משימות וסטטיסטיקות מתוך מסד הנתונים.
+- ה-token שודרג ל-JWT-like חתום HMAC עם `TOKEN_SECRET` ב-Cloudflare.
+- PIN hashing שודרג לשימוש ב-`PIN_PEPPER` עם תאימות לאחור ל-hash הישן.
+- CORS ננעל ל-Origin של Pages ול-localhost/capacitor לפיתוח.
+- `/api/init` חסום בפרודקשן.
+- Cloudflare Worker נפרס מחדש בהצלחה אחרי התיקונים.
+- Cloudflare Pages נפרס מחדש עם ה-bundle המעודכן.
+- תמונות הוכחת ביצוע אומתו בפרודקשן דרך fallback ל-D1: יצירת משימת בדיקה, הגשת תמונה, קריאה דרך `/api/photos/...`, ודחיית משימת הבדיקה.
+- GitHub מחובר: הריפו `yanivsa/screencontrol-tasks` ציבורי, `origin/main` תואם ל-HEAD המקומי, ויש 2 commits.
 - `npm run build` ב-Frontend עובר.
+- `npm run lint` ב-Frontend עובר ללא אזהרות.
 - `node --check backend/src/index.js` עובר.
+- `./gradlew assembleDebug` עובר.
+- `./gradlew bundleRelease` עובר.
+- נוצר AAB חתום: `frontend/android/app/build/outputs/bundle/release/app-release.aab`.
+- חתימת ה-AAB אומתה עם `jarsigner -verify`: `jar verified`.
+- אייקון וספלאש Android הוחלפו מנכסי ברירת מחדל של Capacitor לנכסי ScreenControl Tasks.
+- נוסף `README.md` ראשי.
+- עודכן `frontend/README.md`.
+- נוסף `PRIVACY_POLICY.md`.
 
 ### מה עדיין לא תקין או לא מוכח
 
-- Android build לא אומת: `./gradlew assembleDebug` נכשל במחשב המקומי כי אין Java Runtime זמין.
-- אין קובץ AAB חתום ל-Play Store.
-- אין keystore, signing config, versioning מסודר וחתימת release.
 - אין בדיקת התקנה על מכשיר Android אמיתי.
-- אין בדיקת E2E מלאה של הזרימות: התחברות, יצירת משימה, הגשה עם תמונה, אישור, בקשת זמן מסך, הורדה ידנית, חוב, התראות.
-- ה-token הנוכחי הוא Base64 JSON עם expiry, אבל הוא לא חתום קריפטוגרפית. זה טוב לאבטיפוס, לא מספיק לייצור.
-- hash ה-PIN הוא SHA-256 בסיסי ללא salt/pepper. טוב יותר מטקסט גלוי, אבל לא רמת production מלאה.
-- CORS עדיין לא נעול לדומיין production אמיתי.
-- עדיין קיים endpoint אתחול `/api/init`; ב-production צריך להסיר אותו או להגן עליו בהרשאת מנהל/secret.
-- `database_id = "local-db-id"` ב-`wrangler.toml` הוא placeholder; צריך D1 אמיתי.
-- לא אומתה פריסה ל-Cloudflare Worker.
-- לא אומתו migrations על D1 אמיתי.
-- לא אומת R2 bucket אמיתי ותצוגת תמונות מול ענן.
+- אין בדיקת E2E מלאה על מכשיר אמיתי: התחברות, יצירת משימה, הגשה עם תמונה, אישור, בקשת זמן מסך, הורדה ידנית, חוב, התראות.
+- לא אומת GitHub Actions או Cloudflare GitHub Integration אוטומטי. הריפו מחובר ופרוס, אבל לא הוכח שכל push חדש יוצר deploy תקין.
+- לא אומתו migrations בצורה נקייה על D1 חדש מאפס.
+- R2 לא פעיל בחשבון Cloudflare. ניסיון יצירת bucket נכשל עם הודעה שצריך להפעיל R2 דרך ה-Dashboard. כרגע תמונות עובדות דרך fallback ל-D1.
 - אין מערכת רישום/שחזור PIN מלאה להורה.
 - אין Push Notifications אמיתיות; כרגע מדובר בעיקר ב-polling/התראות פנימיות.
 - אין Offline sync אמיתי.
 - אין audit log מלא לכל פעולה רגישה.
 - אין בדיקות יחידה/API אוטומטיות.
-- `npm run lint` עובר אבל עם אזהרות שצריך לנקות.
-- `frontend/README.md` ו-README ראשי עדיין צריכים להיות תיעוד אמיתי של המוצר.
-- שם האפליקציה עדיין `FinanKids Tasks`; צריך שם סופי לפני Play Store.
-- אייקון Android וספלש עדיין לא הוכחו כנכסי מותג סופיים.
+- נדרש להעלות את ה-AAB ל-Play Console ולבדוק Internal Testing בפועל.
 
 ## 23. מה נשאר כדי להגיע ל-MVP בשל
 
 ### P0 - חובה לפני שימוש משפחתי אמיתי
 
-1. להתקין Java/Android toolchain ולוודא Android build:
-   - להריץ `./gradlew assembleDebug`.
-   - להריץ `./gradlew bundleRelease`.
-   - לבדוק התקנה על מכשיר Android אמיתי.
+1. לבדוק התקנה על מכשיר Android אמיתי:
+   - להתקין את גרסת הבדיקה או להעלות את ה-AAB ל-Internal Testing.
+   - לוודא פתיחה, התחברות, API, צילום/בחירת תמונה ו-RTL.
 
-2. להכין release ל-Google Play:
-   - ליצור keystore.
-   - להגדיר signing config.
-   - להפיק AAB חתום.
-   - להגדיר `versionCode` ו-`versionName`.
-   - להחליף app name, icon ו-splash לנכסים סופיים.
+2. להשלים Play Console:
+   - להעלות את `app-release.aab`.
+   - להגדיר tester group.
+   - להוסיף Privacy Policy.
+   - למלא Data Safety.
+   - להוסיף screenshots, description ו-feature graphic.
 
-3. לפרוס Cloudflare אמיתי:
-   - ליצור D1 production.
-   - לעדכן `database_id`.
-   - ליצור R2 bucket production.
-   - להריץ migrations.
-   - לפרוס Worker.
-   - להגדיר secrets אם נדרשים.
-   - לעדכן `VITE_API_BASE` לדומיין ה-Worker.
+3. להפעיל R2 בחשבון Cloudflare אם רוצים אחסון תמונות ייעודי:
+   - להפעיל R2 ב-Dashboard.
+   - ליצור bucket `screen-tasks-photos`.
+   - לפתוח את binding ה-R2 ב-`backend/wrangler.toml`.
+   - לפרוס Worker מחדש.
+   - לבצע שוב בדיקת תמונה.
 
-4. להקשיח אבטחה:
-   - להחליף Base64 token ב-JWT/HMAC חתום או session token שמור בשרת.
-   - להוסיף salt/pepper ל-PIN hash.
-   - לנעול CORS לדומיין האפליקציה בלבד.
-   - לוודא שכל endpoint בודק role ו-family.
-   - לחסום או להסיר כל endpoint init/seed מסביבת production.
-
-5. להוסיף בדיקות קבלה ידניות ואוטומטיות:
-   - התחברות הורה עם `2602`.
-   - כניסת אורי ואיתן עם PIN נפרד.
-   - יצירת משימה חד-פעמית וקבועה.
-   - Cron ללא כפילויות.
-   - הגשת משימה עם תמונה.
-   - אישור משימה ועדכון יתרה חד-פעמי.
-   - בקשת זמן מסך ואישור הורה.
-   - הורדת דקות ידנית.
-   - ירידה מתחת למינוס 60 עם אזהרה בלבד.
-   - התראות והיסטוריה.
+4. להוכיח deploy אוטומטי:
+   - לבצע commit + push.
+   - לוודא ש-Cloudflare Pages מתעדכן אוטומטית או לתעד פריסה ידנית.
+   - לוודא אם Worker deploy נעשה ידנית או דרך GitHub Actions.
 
 ### P1 - נדרש לפני העלאה רגועה ל-Play Store
 
-1. לנקות lint warnings.
-2. להוסיף מסכי שגיאה וטעינה ברורים.
-3. להוסיף README מלא להרצה, פריסה ובנייה.
-4. להכין Privacy Policy.
-5. להכין Data Safety עבור Google Play.
-6. לוודא שאין איסוף מידע מיותר על ילדים.
-7. לבדוק הרשאות Android: כרגע יש INTERNET בלבד; אם משתמשים בצילום דרך WebView, לוודא הרשאת מצלמה וחוויית בחירת תמונה עובדות במכשיר אמיתי.
-8. להכין צילומי מסך, תיאור אפליקציה, אייקון, feature graphic ושם סופי.
+1. להוסיף מסכי שגיאה וטעינה ברורים יותר.
+2. להכין Data Safety עבור Google Play.
+3. לוודא שאין איסוף מידע מיותר על ילדים.
+4. לבדוק הרשאות Android: כרגע יש INTERNET בלבד; אם משתמשים בצילום דרך WebView, לוודא הרשאת מצלמה וחוויית בחירת תמונה עובדות במכשיר אמיתי.
+5. להכין צילומי מסך, תיאור אפליקציה ו-feature graphic.
 
 ### P2 - שיפורים לאחר MVP
 
@@ -1254,19 +1247,20 @@ Config:
 
 ## 24. החלטת Go / No-Go ל-Google Play
 
-החלטה: No-Go כרגע.
+החלטה: Go ל-Internal Testing אחרי העלאה ידנית ל-Play Console ובדיקת התקנה ראשונה.
 
-האפליקציה לא צריכה לעלות עדיין ל-Google Play Store, גם לא כגרסת production. אפשר לשקול Internal Testing רק אחרי שיש AAB חתום, backend פרוס, בדיקות בסיסיות עוברות על מכשיר אמיתי, ו-Privacy/Data Safety מוכנים.
+האפליקציה עדיין לא צריכה לעלות ל-Production ציבורי. היא כן מוכנה טכנית לשלב Internal Testing לאחר העלאת ה-AAB החתום ומילוי Privacy/Data Safety ב-Play Console.
 
 תנאי Go ל-Internal Testing:
 
 - AAB חתום נבנה בהצלחה.
 - האפליקציה מותקנת ונפתחת על מכשיר Android אמיתי.
-- Backend Cloudflare production עובד מול D1/R2 אמיתיים.
+- Backend Cloudflare production עובד מול D1 אמיתי.
+- תמונות עובדות דרך D1 fallback, או R2 הופעל ואומת.
 - הורה יכול להתחבר, ליצור משימה, לאשר משימה ולהוריד דקות.
 - ילד יכול להיכנס, להגיש משימה, לבקש זמן מסך ולראות יתרה.
 - תמונה עולה ונצפית על ידי ההורה.
 - אין טיימר באפליקציה.
 - אין חסימה קשיחה במינוס 60.
-- אין אזהרות lint משמעותיות.
+- אין אזהרות lint.
 - Privacy Policy ו-Data Safety מוכנים.

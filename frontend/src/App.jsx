@@ -38,7 +38,19 @@ function playSound(type) {
       osc.connect(gain); gain.connect(audioCtx.destination);
       osc.start(now); osc.stop(now + 0.06);
     }
-  } catch (err) {}
+  } catch {}
+}
+
+function decodeTokenPayload(rawToken) {
+  const payloadPart = rawToken.includes('.') ? rawToken.split('.')[1] : rawToken;
+  const normalized = payloadPart.replaceAll('-', '+').replaceAll('_', '/');
+  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+  const binaryStr = atob(padded);
+  const bytes = new Uint8Array(binaryStr.length);
+  for (let i = 0; i < binaryStr.length; i++) {
+    bytes[i] = binaryStr.charCodeAt(i);
+  }
+  return JSON.parse(new TextDecoder().decode(bytes));
 }
 
 function ConfettiParticles() {
@@ -87,7 +99,7 @@ export default function App() {
 
   const [tasks, setTasks] = useState([]);
   const [taskTemplates, setTaskTemplates] = useState([]);
-  const [notifications, setNotifications] = useState([]);
+  const [, setNotifications] = useState([]);
   const [screenRequests, setScreenRequests] = useState([]);
   const [wallet, setWallet] = useState({ child: null, stats: { earned_today: 0, spent_today: 0 } });
 
@@ -117,20 +129,14 @@ export default function App() {
     const savedToken = localStorage.getItem('app_token');
     if (savedToken) {
       try {
-        const binaryStr = atob(savedToken);
-        const bytes = new Uint8Array(binaryStr.length);
-        for (let i = 0; i < binaryStr.length; i++) {
-          bytes[i] = binaryStr.charCodeAt(i);
-        }
-        const jsonStr = new TextDecoder().decode(bytes);
-        const payload = JSON.parse(jsonStr);
+        const payload = decodeTokenPayload(savedToken);
         if (payload && payload.exp > Date.now()) {
           setCurrentUser(payload);
           setToken(savedToken);
         } else {
           localStorage.removeItem('app_token');
         }
-      } catch (e) {
+      } catch {
         localStorage.removeItem('app_token');
       }
     }
@@ -138,6 +144,8 @@ export default function App() {
 
   useEffect(() => {
     fetchChildren();
+    // fetchChildren intentionally reads the latest auth state through closures.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, currentUser]);
 
   const fetchChildren = async () => {
@@ -146,7 +154,7 @@ export default function App() {
       const path = (currentUser && currentUser.role === 'parent') ? '/api/children/details' : '/api/children';
       const res = await apiFetch(path);
       if (res.ok) setChildren(await res.json());
-    } catch (err) {}
+    } catch {}
   };
 
   useEffect(() => {
@@ -169,27 +177,29 @@ export default function App() {
     loadData();
     const interval = setInterval(loadData, 10000);
     return () => clearInterval(interval);
+    // Data loaders are grouped here to keep polling behavior centralized.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser]);
 
   const fetchStats = async () => {
     try {
       const res = await apiFetch(`/api/dashboard/stats`);
       if (res.ok) setStats(await res.json());
-    } catch (err) {}
+    } catch {}
   };
 
   const fetchWallet = async (childId) => {
     try {
       const res = await apiFetch(`/api/children/${childId}/wallet`);
       if (res.ok) setWallet(await res.json());
-    } catch (err) {}
+    } catch {}
   };
 
   const fetchTaskTemplates = async () => {
     try {
       const res = await apiFetch(`/api/task-templates`);
       if (res.ok) setTaskTemplates(await res.json());
-    } catch (err) {}
+    } catch {}
   };
 
   const fetchTasks = async (childId = '') => {
@@ -197,7 +207,7 @@ export default function App() {
       const query = childId ? `?childId=${childId}` : '';
       const res = await apiFetch(`/api/tasks${query}`);
       if (res.ok) setTasks(await res.json());
-    } catch (err) {}
+    } catch {}
   };
 
   const fetchScreenRequests = async (childId = '') => {
@@ -205,7 +215,7 @@ export default function App() {
       const query = childId ? `?childId=${childId}` : '';
       const res = await apiFetch(`/api/screen-time-requests${query}`);
       if (res.ok) setScreenRequests(await res.json());
-    } catch (err) {}
+    } catch {}
   };
 
   const fetchNotifications = async (type, childId = '') => {
@@ -222,7 +232,7 @@ export default function App() {
           });
         }
       }
-    } catch (err) {}
+    } catch {}
   };
 
   const handleKeyPress = (num) => {
@@ -254,7 +264,7 @@ export default function App() {
         setError(data.error || 'קוד שגוי');
         setPinInput('');
       }
-    } catch (err) {
+    } catch {
       playSound('error');
       setError('בעיית תקשורת בשרת');
       setPinInput('');
@@ -291,7 +301,7 @@ export default function App() {
         setNewTask({ title: '', description: '', rewardMinutes: 15, assignedChildIds: [], scheduleType: 'one_time', requiresPhoto: false });
         fetchTasks(); fetchTaskTemplates();
       }
-    } catch (err) {}
+    } catch {}
   };
 
   const handleTaskSubmit = async (e) => {
@@ -309,7 +319,7 @@ export default function App() {
       } else {
         alert((await res.json()).error);
       }
-    } catch (err) {}
+    } catch {}
   };
 
   const handleApprove = async (instanceId) => {
