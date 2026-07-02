@@ -1,0 +1,47 @@
+$agent = {
+    callbacks: {},
+
+    interface: {},
+
+    request: function (rpc, callback) {
+
+        var nonce = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+
+        $agent.callbacks[nonce] = function (data) {
+            /* Execute the callback */
+            callback(data);
+
+            /* Delete itself to free up memory */
+            delete $agent.callbacks[nonce];
+        };
+
+        $agent.interface.postMessage({
+            request: { data: rpc, nonce: nonce }
+        });
+
+    },
+
+    response: function (data) {
+        $agent.interface.postMessage({
+            response: { data: data }
+        });
+    },
+
+    trigger: function (event, options) {
+        $agent.interface.postMessage({
+            trigger: { name: event, data: options }
+        });
+    },
+
+    href: function (href) {
+        $agent.interface.postMessage({
+            href: { data: href }
+        });
+    }
+};
+
+// Ensure $agent is present in the window global
+window.$agent = $agent;
+
+// Flutter call handler
+$agent.interface.postMessage = (args) => window.flutter_inappwebview.callHandler('💙', JSON.stringify(args));

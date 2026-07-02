@@ -1,0 +1,14 @@
+{
+  "name": "screen-tasks-backend",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker Backend for Screen Time Tasks App",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "wrangler": "^3.109.0"
+  }
+}

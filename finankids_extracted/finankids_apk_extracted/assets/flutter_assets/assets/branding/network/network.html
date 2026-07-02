@@ -1,0 +1,51 @@
+<html>
+<head>
+<meta charset="UTF-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@700&family=Montserrat:wght@700&family=Roboto:wght@700&display=swap" rel="stylesheet">
+<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1, height=device-height"/>
+    <style>
+ :root {
+        --index: calc(1vw + 1vh)!important;
+      } 
+    body {
+        margin: 0;
+        padding: 0;
+        background-color: #FFFFFF;
+    }
+    .error-screen__container {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        background-color: #17AD5D;
+       
+    }
+
+
+    #error-screen__app-name {
+        width: 90%;
+        text-align: center;
+        font-family: Roboto, sans-serif;
+        font-size: calc(var(--index) * 14 / 5);
+        font-weight: bold;
+        color: #FFFFFF;
+        position: absolute;
+        top: 15%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        z-index: 1000;
+}
+   
+
+ 
+</style>
+</head>
+<body>
+<div class="error-screen__container">
+  <div id="error-screen__gif"></div>
+
+<div id="error-screen__app-name">רענן את הדף</div>
+</div>
+</body>
+</html>

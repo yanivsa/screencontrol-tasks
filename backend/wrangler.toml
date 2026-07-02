@@ -1,0 +1,13 @@
+name = "screen-tasks-backend"
+main = "src/index.js"
+compatibility_date = "2024-03-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "screen_tasks_db"
+database_id = "427f12bb-1bca-47ed-825d-624ee0ed0f13"
+
+
+
+[triggers]
+crons = ["0 3 * * *"]
