@@ -163,6 +163,143 @@ async function instantiateDailyTasks(db) {
   }
 }
 
+function getXpToNextLevel(level) {
+  return 100 + (Math.max(level, 1) - 1) * 50;
+}
+
+function getTaskXp(minutes, requiresPhoto = 0) {
+  const baseXp = Math.max(10, Math.round(Number(minutes || 0) * 1.25));
+  return requiresPhoto ? baseXp + 10 : baseXp;
+}
+
+function getDayDiff(previousDay, currentDay) {
+  if (!previousDay) return null;
+  const previous = new Date(`${previousDay}T00:00:00Z`).getTime();
+  const current = new Date(`${currentDay}T00:00:00Z`).getTime();
+  return Math.round((current - previous) / (24 * 60 * 60 * 1000));
+}
+
+async function ensureGamificationSchema(db) {
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS child_progress (
+      child_id TEXT PRIMARY KEY,
+      family_id TEXT NOT NULL,
+      level INTEGER DEFAULT 1,
+      xp INTEGER DEFAULT 0,
+      current_streak_days INTEGER DEFAULT 0,
+      best_streak_days INTEGER DEFAULT 0,
+      last_completed_day TEXT,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
+
+  await db.prepare(`
+    CREATE TABLE IF NOT EXISTS reward_events (
+      id TEXT PRIMARY KEY,
+      family_id TEXT NOT NULL,
+      child_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      minutes_delta INTEGER DEFAULT 0,
+      xp_delta INTEGER DEFAULT 0,
+      level_before INTEGER,
+      level_after INTEGER,
+      streak_days INTEGER DEFAULT 0,
+      task_instance_id TEXT,
+      seen_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
+}
+
+async function getOrCreateChildProgress(db, familyId, childId) {
+  await db.prepare(`
+    INSERT OR IGNORE INTO child_progress (child_id, family_id, level, xp, current_streak_days, best_streak_days)
+    VALUES (?, ?, 1, 0, 0, 0)
+  `).bind(childId, familyId).run();
+  return db.prepare("SELECT * FROM child_progress WHERE child_id = ?").bind(childId).first();
+}
+
+async function recordRewardEvent(db, {
+  familyId,
+  childId,
+  type,
+  title,
+  body,
+  minutesDelta = 0,
+  xpDelta = 0,
+  levelBefore = null,
+  levelAfter = null,
+  streakDays = 0,
+  taskInstanceId = null
+}) {
+  const id = generateUUID();
+  await db.prepare(`
+    INSERT INTO reward_events (
+      id, family_id, child_id, type, title, body, minutes_delta, xp_delta,
+      level_before, level_after, streak_days, task_instance_id
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).bind(
+    id, familyId, childId, type, title, body, minutesDelta, xpDelta,
+    levelBefore, levelAfter, streakDays, taskInstanceId
+  ).run();
+  return id;
+}
+
+async function awardTaskProgress(db, familyId, instance, minutesDelta) {
+  const today = new Date().toISOString().split("T")[0];
+  const progress = await getOrCreateChildProgress(db, familyId, instance.child_id);
+  const levelBefore = progress.level || 1;
+  let levelAfter = levelBefore;
+  let xpAfter = (progress.xp || 0) + getTaskXp(minutesDelta, instance.requires_photo);
+  while (xpAfter >= getXpToNextLevel(levelAfter)) {
+    xpAfter -= getXpToNextLevel(levelAfter);
+    levelAfter += 1;
+  }
+
+  const dayDiff = getDayDiff(progress.last_completed_day, today);
+  let streakDays = progress.current_streak_days || 0;
+  if (dayDiff === 0) {
+    streakDays = Math.max(streakDays, 1);
+  } else if (dayDiff === 1) {
+    streakDays += 1;
+  } else {
+    streakDays = 1;
+  }
+
+  const bestStreak = Math.max(progress.best_streak_days || 0, streakDays);
+  await db.prepare(`
+    UPDATE child_progress
+    SET level = ?, xp = ?, current_streak_days = ?, best_streak_days = ?,
+        last_completed_day = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE child_id = ?
+  `).bind(levelAfter, xpAfter, streakDays, bestStreak, today, instance.child_id).run();
+
+  const xpDelta = getTaskXp(minutesDelta, instance.requires_photo);
+  const title = levelAfter > levelBefore ? `עלית לרמה ${levelAfter}!` : "משימה אושרה!";
+  const body = levelAfter > levelBefore
+    ? `קיבלת ${minutesDelta} דקות, ${xpDelta} XP ועלית רמה.`
+    : `קיבלת ${minutesDelta} דקות ו-${xpDelta} XP.`;
+
+  await recordRewardEvent(db, {
+    familyId,
+    childId: instance.child_id,
+    type: levelAfter > levelBefore ? "level_up" : "task_approved",
+    title,
+    body,
+    minutesDelta,
+    xpDelta,
+    levelBefore,
+    levelAfter,
+    streakDays,
+    taskInstanceId: instance.id
+  });
+
+  return { xpDelta, levelBefore, levelAfter, streakDays, xp: xpAfter, xpToNextLevel: getXpToNextLevel(levelAfter) };
+}
+
 export default {
   // Cron handler for generating daily recurring tasks and 7-day photo cleanup
   async scheduled(event, env, ctx) {
@@ -314,6 +451,7 @@ export default {
           "SELECT id, name, available_minutes, debt_limit_minutes, daily_spend_limit_minutes FROM children WHERE id = ?"
         ).bind(childId).first();
         if (!child) return responseError("הילד לא נמצא", 404, corsHeaders);
+        const progress = await getOrCreateChildProgress(env.DB, user.familyId, childId);
 
         const todayStr = new Date().toISOString().split("T")[0] + "%";
         const stats = await env.DB.prepare(`
@@ -326,7 +464,14 @@ export default {
 
         return responseJson({
           child,
-          stats: { earned_today: stats?.earned_today || 0, spent_today: stats?.spent_today || 0 }
+          stats: { earned_today: stats?.earned_today || 0, spent_today: stats?.spent_today || 0 },
+          progress: {
+            level: progress.level || 1,
+            xp: progress.xp || 0,
+            xp_to_next_level: getXpToNextLevel(progress.level || 1),
+            current_streak_days: progress.current_streak_days || 0,
+            best_streak_days: progress.best_streak_days || 0
+          }
         }, 200, corsHeaders);
       }
 
@@ -497,6 +642,7 @@ export default {
             INSERT INTO notifications (id, family_id, recipient_type, recipient_id, type, title, body, entity_type, entity_id)
             VALUES (?, ?, 'child', ?, 'task_reviewed', 'המשימה אושרה! 🎉', ?, 'task_instance', ?)
           `).bind(generateUUID(), user.familyId, instance.child_id, `ההורה אישר את המשימה וקיבלת ${finalReward} דקות מסך!`, instanceId).run();
+          await awardTaskProgress(env.DB, user.familyId, instance, finalReward);
 
         } else {
           await env.DB.prepare("UPDATE task_instances SET status = 'rejected', reviewed_at = CURRENT_TIMESTAMP, reviewed_by = 'parent' WHERE id = ?").bind(instanceId).run();
@@ -573,6 +719,17 @@ export default {
           INSERT INTO notifications (id, family_id, recipient_type, recipient_id, type, title, body)
           VALUES (?, ?, 'child', ?, 'info', ?, ?)
         `).bind(generateUUID(), user.familyId, childId, title, body).run();
+        if (type !== "spend") {
+          await recordRewardEvent(env.DB, {
+            familyId: user.familyId,
+            childId,
+            type: "manual_bonus",
+            title: "בונוס חדש!",
+            body: `ההורה הוסיף לך ${Math.abs(adjMinutes)} דקות.`,
+            minutesDelta: Math.abs(adjMinutes),
+            xpDelta: 0
+          });
+        }
 
         return responseJson({ success: true, newBalance }, 200, corsHeaders);
       }
@@ -804,6 +961,28 @@ export default {
         return responseJson(results, 200, corsHeaders);
       }
 
+      if (path === "/api/reward-events" && request.method === "GET") {
+        const childId = url.searchParams.get("childId") || user.id;
+        if (user.role === "child" && childId !== user.id) return responseError("גישה חסומה", 403, corsHeaders);
+        if (user.role === "parent" && !childId) return responseError("לא נבחר ילד", 400, corsHeaders);
+        const onlyUnseen = url.searchParams.get("unseen") === "1";
+        let query = "SELECT * FROM reward_events WHERE family_id = ? AND child_id = ? ";
+        const params = [user.familyId, childId];
+        if (onlyUnseen) query += "AND seen_at IS NULL ";
+        query += "ORDER BY created_at ASC LIMIT 20";
+        const { results } = await env.DB.prepare(query).bind(...params).all();
+        return responseJson(results, 200, corsHeaders);
+      }
+
+      if (path === "/api/reward-events/read" && request.method === "POST") {
+        const { rewardEventIds } = await request.json();
+        if (rewardEventIds && rewardEventIds.length > 0) {
+          const placeholders = rewardEventIds.map(() => "?").join(",");
+          await env.DB.prepare(`UPDATE reward_events SET seen_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`).bind(...rewardEventIds).run();
+        }
+        return responseJson({ success: true }, 200, corsHeaders);
+      }
+
       if (path === "/api/notifications" && request.method === "GET") {
         const recipientType = url.searchParams.get("recipientType"); 
         const recipientId = url.searchParams.get("recipientId");
@@ -841,6 +1020,7 @@ async function ensureSeedData(env) {
   const db = env.DB;
   const tableCheck = await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='families'").first();
   if (!tableCheck) return; 
+  await ensureGamificationSchema(db);
   const family = await db.prepare("SELECT id FROM families WHERE id = 'yanivsa'").first();
   if (!family) await seedDatabase(db, env);
 }
@@ -854,6 +1034,8 @@ async function seedDatabase(db, env = {}) {
   await db.prepare(`INSERT OR REPLACE INTO families (id, name, parent_pin_hash, settings_json) VALUES ('yanivsa', 'משפחת יניב', ?, '{}')`).bind(parentPinHash).run();
   await db.prepare(`INSERT OR REPLACE INTO children (id, family_id, name, pin_hash, avatar, color, available_minutes) VALUES ('uri', 'yanivsa', 'אורי', ?, 'avatar_boy_1', '#3B82F6', 45)`).bind(uriPinHash).run();
   await db.prepare(`INSERT OR REPLACE INTO children (id, family_id, name, pin_hash, avatar, color, available_minutes) VALUES ('eitan', 'yanivsa', 'איתן', ?, 'avatar_boy_2', '#10B981', 60)`).bind(eitanPinHash).run();
+  await getOrCreateChildProgress(db, "yanivsa", "uri");
+  await getOrCreateChildProgress(db, "yanivsa", "eitan");
 
   const templates = [
     { id: "tpl_brush_teeth", title: "צחצוח שיניים בוקר וערב", desc: "לצחצח שיניים היטב במשך 2 דקות בבוקר ובערב", minutes: 10, schedule: "daily", photo: 0 },

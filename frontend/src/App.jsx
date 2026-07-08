@@ -18,6 +18,19 @@ function playSound(type) {
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
       osc.connect(gain); gain.connect(audioCtx.destination);
       osc.start(now); osc.stop(now + 0.45);
+    } else if (type === 'level') {
+      [523.25, 659.25, 783.99, 1046.50].forEach((freq, index) => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        const start = now + index * 0.08;
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, start);
+        gain.gain.setValueAtTime(0, start);
+        gain.gain.linearRampToValueAtTime(0.22, start + 0.03);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + 0.35);
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.start(start); osc.stop(start + 0.38);
+      });
     } else if (type === 'error') {
       const osc = audioCtx.createOscillator();
       const gain = audioCtx.createGain();
@@ -39,6 +52,10 @@ function playSound(type) {
       osc.start(now); osc.stop(now + 0.06);
     }
   } catch {}
+}
+
+function vibrate(pattern) {
+  if (navigator.vibrate) navigator.vibrate(pattern);
 }
 
 function decodeTokenPayload(rawToken) {
@@ -85,6 +102,42 @@ function ConfettiParticles() {
   );
 }
 
+function RewardCelebration({ reward, childName, onClose }) {
+  if (!reward) return null;
+  const isLevelUp = reward.level_after && reward.level_after > reward.level_before;
+  const streakText = reward.streak_days > 1 ? `${reward.streak_days} ימים ברצף` : (reward.streak_days === 1 ? 'יום ראשון ברצף' : 'אין רצף חדש');
+
+  return (
+    <div className="reward-overlay">
+      <ConfettiParticles />
+      <div className="reward-celebration animated-view">
+        <div className="reward-orbit">
+          <div className="reward-core">{isLevelUp ? '▲' : '+'}</div>
+        </div>
+        <div className="reward-kicker">{isLevelUp ? 'עליית רמה' : 'פרס חדש'}</div>
+        <h2>{reward.title || `כל הכבוד, ${childName}!`}</h2>
+        <div className="reward-minutes-big">+{reward.minutes_delta || 0} דק׳</div>
+        <p>{reward.body}</p>
+        <div className="reward-progress-grid">
+          <div>
+            <strong>+{reward.xp_delta || 0}</strong>
+            <span>XP</span>
+          </div>
+          <div>
+            <strong>{reward.level_after || reward.level_before || 1}</strong>
+            <span>רמה</span>
+          </div>
+          <div>
+            <strong>{streakText}</strong>
+            <span>רצף</span>
+          </div>
+        </div>
+        <button className="btn btn-primary reward-continue" onClick={onClose}>המשך</button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem('app_token'));
@@ -102,6 +155,9 @@ export default function App() {
   const [, setNotifications] = useState([]);
   const [screenRequests, setScreenRequests] = useState([]);
   const [wallet, setWallet] = useState({ child: null, stats: { earned_today: 0, spent_today: 0 } });
+  const [displayedMinutes, setDisplayedMinutes] = useState(0);
+  const [rewardEvents, setRewardEvents] = useState([]);
+  const [activeReward, setActiveReward] = useState(null);
 
   const [stats, setStats] = useState({});
   const [showAddTaskModal, setShowAddTaskModal] = useState(false);
@@ -172,6 +228,7 @@ export default function App() {
         fetchTasks(currentUser.id);
         fetchNotifications('child', currentUser.id);
         fetchScreenRequests(currentUser.id);
+        fetchRewardEvents(currentUser.id);
       }
     };
     loadData();
@@ -191,7 +248,28 @@ export default function App() {
   const fetchWallet = async (childId) => {
     try {
       const res = await apiFetch(`/api/children/${childId}/wallet`);
-      if (res.ok) setWallet(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setWallet(data);
+        if (!activeReward) setDisplayedMinutes(data.child?.available_minutes || 0);
+      }
+    } catch {}
+  };
+
+  const fetchRewardEvents = async (childId) => {
+    try {
+      const res = await apiFetch(`/api/reward-events?childId=${childId}&unseen=1`);
+      if (res.ok) {
+        const data = await res.json();
+        setRewardEvents(data);
+        if (!activeReward && data.length > 0) {
+          setActiveReward(data[0]);
+          playSound(data[0].level_after > data[0].level_before ? 'level' : 'success');
+          vibrate([30, 40, 80]);
+          setTriggerConfetti(true);
+          setTimeout(() => setTriggerConfetti(false), 3500);
+        }
+      }
     } catch {}
   };
 
@@ -217,6 +295,24 @@ export default function App() {
       if (res.ok) setScreenRequests(await res.json());
     } catch {}
   };
+
+  useEffect(() => {
+    if (!activeReward || !wallet.child) return;
+    const target = wallet.child.available_minutes || 0;
+    const start = Math.max(0, target - (activeReward.minutes_delta || 0));
+    setDisplayedMinutes(start);
+    const diff = target - start;
+    if (diff <= 0) return;
+    let step = 0;
+    const totalSteps = Math.min(40, Math.max(12, diff));
+    const timer = setInterval(() => {
+      step += 1;
+      const eased = 1 - Math.pow(1 - step / totalSteps, 3);
+      setDisplayedMinutes(Math.round(start + diff * eased));
+      if (step >= totalSteps) clearInterval(timer);
+    }, 28);
+    return () => clearInterval(timer);
+  }, [activeReward, wallet.child]);
 
   const fetchNotifications = async (type, childId = '') => {
     try {
@@ -445,6 +541,25 @@ export default function App() {
     if (res.ok) {
       playSound('success'); setShowManualLogModal(false); fetchChildren();
     } else alert((await res.json()).error);
+  };
+
+  const closeActiveReward = async () => {
+    if (!activeReward) return;
+    const currentRewardId = activeReward.id;
+    const remainingRewards = rewardEvents.filter(event => event.id !== currentRewardId);
+    setActiveReward(remainingRewards[0] || null);
+    setRewardEvents(remainingRewards);
+    try {
+      await apiFetch(`/api/reward-events/read`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rewardEventIds: [currentRewardId] })
+      });
+      if (currentUser?.role === 'child') {
+        fetchWallet(currentUser.id);
+        fetchRewardEvents(currentUser.id);
+      }
+    } catch {}
   };
 
   if (pinTarget) {
@@ -740,16 +855,80 @@ export default function App() {
 
   const childThemeClass = currentUser.id === 'uri' ? 'uri' : 'eitan';
   const childOpenTasks = tasks.filter(t => t.child_id === currentUser.id && t.status === 'open');
+  const childSubmittedTasks = tasks.filter(t => t.child_id === currentUser.id && t.status === 'submitted');
+  const childApprovedToday = tasks.filter(t => {
+    if (t.child_id !== currentUser.id || t.status !== 'approved' || !t.reviewed_at) return false;
+    return t.reviewed_at.startsWith(new Date().toISOString().split('T')[0]);
+  });
+  const progress = wallet.progress || { level: 1, xp: 0, xp_to_next_level: 100, current_streak_days: 0 };
+  const xpPercent = Math.min(100, Math.round(((progress.xp || 0) / (progress.xp_to_next_level || 100)) * 100));
+  const nextTask = childOpenTasks[0];
+  const earnedToday = wallet.stats?.earned_today || 0;
+  const completedToday = childApprovedToday.length;
+  const dailyGoalPercent = Math.min(100, Math.round((completedToday / 3) * 100));
+  const minutesGoalPercent = Math.min(100, Math.round((earnedToday / 45) * 100));
+  const streakGoalPercent = Math.min(100, Math.round(((progress.current_streak_days || 0) / 7) * 100));
+  const achievementCards = [
+    { label: 'יעד יומי', value: `${completedToday}/3`, progress: dailyGoalPercent, tone: 'gold' },
+    { label: 'דקות היום', value: `${earnedToday}/45`, progress: minutesGoalPercent, tone: 'blue' },
+    { label: 'רצף שבועי', value: `${progress.current_streak_days || 0}/7`, progress: streakGoalPercent, tone: 'green' }
+  ];
 
   return (
     <div className={`app-container ${childThemeClass} animated-view`}>
       <header className="app-header"><div className="app-title">{currentUser.name}</div><div className="user-badge" onClick={handleLogout}>החלף 👤</div></header>
       {triggerConfetti && <ConfettiParticles />}
+      <RewardCelebration reward={activeReward} childName={currentUser.name} onClose={closeActiveReward} />
 
       {childTab === 'dashboard' && (
         <div>
+          <div className="player-card">
+            <img src={currentUser.id === 'uri' ? '/uri_avatar.jpg' : '/eitan_avatar.jpg'} alt={currentUser.name} className="player-avatar" />
+            <div className="player-info">
+              <div className="player-name">{currentUser.name}</div>
+              <div className="player-level">רמה {progress.level || 1} · רצף {progress.current_streak_days || 0} ימים</div>
+              <div className="level-track"><span style={{ width: `${xpPercent}%` }} /></div>
+              <div className="level-copy">{progress.xp || 0}/{progress.xp_to_next_level || 100} XP לרמה הבאה</div>
+            </div>
+          </div>
+
+          <div className="achievement-row">
+            {achievementCards.map(card => (
+              <div className={`achievement-chip ${card.tone}`} key={card.label}>
+                <div className="achievement-ring" style={{ '--progress': `${card.progress}%` }}>
+                  <span>{card.value}</span>
+                </div>
+                <div>
+                  <strong>{card.label}</strong>
+                  <small>{card.progress === 100 ? 'הושלם' : 'בדרך לפרס'}</small>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {nextTask && (
+            <div className="next-task-card" onClick={() => setSelectedTaskForSubmission(nextTask)}>
+              <div>
+                <div className="next-task-kicker">המשימה הבאה</div>
+                <div className="task-title">{nextTask.title}</div>
+                <div className="task-desc">עוד צעד קטן לפרס הבא</div>
+              </div>
+              <div className="reward-badge reward-badge-plus"><span>+</span>{nextTask.reward_minutes} דק׳</div>
+            </div>
+          )}
+
+          {!nextTask && (
+            <div className="complete-day-card">
+              <div className="complete-day-mark">✓</div>
+              <div>
+                <div className="task-title">כל המשימות פתוחות הסתיימו</div>
+                <div className="task-desc">אפשר להציע משימה חדשה או לבקש זמן מסך</div>
+              </div>
+            </div>
+          )}
+
           <div className="wallet-card">
-            <div className="wallet-minutes">{wallet.child?.available_minutes || 0}</div>
+            <div className={`wallet-minutes ${activeReward ? 'is-counting' : ''}`}>{displayedMinutes}</div>
             <div className="wallet-label">דקות מסך בארנק שלך ⏱️</div>
             <button className="btn btn-primary" onClick={() => setShowScreenRequestModal(true)}>🎮 בקש זמן מסך</button>
             <button className="btn btn-secondary" style={{ marginTop: '10px', width: '100%' }} onClick={() => setShowProposeModal(true)}>💡 הצע משימה להורה</button>
@@ -758,12 +937,20 @@ export default function App() {
               <div className="stat-item"><span className="stat-val">{wallet.stats?.spent_today || 0}</span><span className="stat-label">ניצלת היום</span></div>
             </div>
           </div>
+
+          {childSubmittedTasks.length > 0 && (
+            <div className="pending-strip">
+              <strong>{childSubmittedTasks.length}</strong>
+              <span>משימות מחכות לאישור הורה</span>
+            </div>
+          )}
+
           <div className="section-title">משימות פתוחות ({childOpenTasks.length})</div>
           <div className="card-list">
             {childOpenTasks.slice(0, 3).map(task => (
               <div key={task.id} className="task-card" onClick={() => setSelectedTaskForSubmission(task)}>
                 <div className="task-info"><div className="task-title">{task.title}</div><div className="task-desc">{task.description}</div></div>
-                <div className="reward-badge">+{task.reward_minutes}</div>
+                <div className="reward-badge reward-badge-plus"><span>+</span>{task.reward_minutes}</div>
               </div>
             ))}
           </div>
@@ -772,7 +959,31 @@ export default function App() {
 
       {childTab === 'tasks' && (
         <div>
-          <div className="section-title">היסטוריית משימות ובקשות</div>
+          <div className="section-title">משימות שהוגשו</div>
+          <div className="card-list">
+            {childSubmittedTasks.length === 0 ? <p style={{ color: 'var(--text-secondary)', textAlign: 'center' }}>אין משימות שמחכות לאישור</p> :
+              childSubmittedTasks.map(task => (
+                <div key={task.id} className="task-card">
+                  <div className="task-info"><div className="task-title">{task.title}</div><div className="task-desc">מחכה לאישור הורה</div></div>
+                  <span className="status-badge submitted">ממתין</span>
+                </div>
+              ))
+            }
+          </div>
+
+          <div className="section-title">הצלחות היום</div>
+          <div className="card-list">
+            {childApprovedToday.length === 0 ? <p style={{ color: 'var(--text-secondary)', textAlign: 'center' }}>עוד אין משימות שאושרו היום</p> :
+              childApprovedToday.map(task => (
+                <div key={task.id} className="task-card">
+                  <div className="task-info"><div className="task-title">{task.title}</div><div className="task-desc">אושר היום</div></div>
+                  <span className="status-badge approved">+{task.reward_minutes} דק׳</span>
+                </div>
+              ))
+            }
+          </div>
+
+          <div className="section-title">בקשות זמן מסך</div>
           <div className="card-list">
             {screenRequests.map(req => (
               <div key={req.id} className="task-card">
