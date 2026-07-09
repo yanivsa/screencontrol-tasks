@@ -1247,13 +1247,14 @@ Config:
 
 ## 24. החלטת Go / No-Go ל-Google Play
 
-החלטה: Go ל-Internal Testing אחרי העלאה ידנית ל-Play Console ובדיקת התקנה ראשונה.
+החלטה: Go ל-Internal Testing. החסם היחיד שנותר הוא העלאה ידנית של ה-AAB ב-Play Console ובדיקת התקנה ראשונה על מכשיר Android אמיתי.
 
-האפליקציה עדיין לא צריכה לעלות ל-Production ציבורי. היא כן מוכנה טכנית לשלב Internal Testing לאחר העלאת ה-AAB החתום ומילוי Privacy/Data Safety ב-Play Console.
+האפליקציה עדיין לא צריכה לעלות ל-Production ציבורי. יש בשלות טכנית ל-Internal Testing: ה-AAB חתום, ה-Frontend וה-Backend פרוסים, Cloudflare D1 עובד בפרודקשן, ותמונות עובדות דרך fallback ל-D1.
 
 תנאי Go ל-Internal Testing:
 
 - AAB חתום נבנה בהצלחה.
+- ה-AAB הועלה ל-Play Console.
 - האפליקציה מותקנת ונפתחת על מכשיר Android אמיתי.
 - Backend Cloudflare production עובד מול D1 אמיתי.
 - תמונות עובדות דרך D1 fallback, או R2 הופעל ואומת.

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8787';
+const API_BASE = import.meta.env.VITE_API_BASE || 'https://screen-tasks-backend.yanivsa.workers.dev';
 
 function playSound(type) {
   try {
@@ -51,7 +51,7 @@ function playSound(type) {
       osc.connect(gain); gain.connect(audioCtx.destination);
       osc.start(now); osc.stop(now + 0.06);
     }
-  } catch {}
+  } catch (err) { console.error(err); }
 }
 
 function vibrate(pattern) {
@@ -59,15 +59,20 @@ function vibrate(pattern) {
 }
 
 function decodeTokenPayload(rawToken) {
-  const payloadPart = rawToken.includes('.') ? rawToken.split('.')[1] : rawToken;
-  const normalized = payloadPart.replaceAll('-', '+').replaceAll('_', '/');
-  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
-  const binaryStr = atob(padded);
-  const bytes = new Uint8Array(binaryStr.length);
-  for (let i = 0; i < binaryStr.length; i++) {
-    bytes[i] = binaryStr.charCodeAt(i);
+  try {
+    const payloadPart = rawToken.includes('.') ? rawToken.split('.')[1] : rawToken;
+    const normalized = payloadPart.replaceAll('-', '+').replaceAll('_', '/');
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+    const binaryStr = atob(padded);
+    const bytes = new Uint8Array(binaryStr.length);
+    for (let i = 0; i < binaryStr.length; i++) {
+      bytes[i] = binaryStr.charCodeAt(i);
+    }
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch (err) {
+    console.error("JWT Decode error:", err);
+    return null;
   }
-  return JSON.parse(new TextDecoder().decode(bytes));
 }
 
 function ConfettiParticles() {
@@ -192,7 +197,8 @@ export default function App() {
         } else {
           localStorage.removeItem('app_token');
         }
-      } catch {
+      } catch (err) {
+        console.error(err);
         localStorage.removeItem('app_token');
       }
     }
@@ -210,7 +216,7 @@ export default function App() {
       const path = (currentUser && currentUser.role === 'parent') ? '/api/children/details' : '/api/children';
       const res = await apiFetch(path);
       if (res.ok) setChildren(await res.json());
-    } catch {}
+    } catch (err) { console.error(err); }
   };
 
   useEffect(() => {
@@ -242,7 +248,7 @@ export default function App() {
     try {
       const res = await apiFetch(`/api/dashboard/stats`);
       if (res.ok) setStats(await res.json());
-    } catch {}
+    } catch (err) { console.error(err); }
   };
 
   const fetchWallet = async (childId) => {
@@ -253,7 +259,7 @@ export default function App() {
         setWallet(data);
         if (!activeReward) setDisplayedMinutes(data.child?.available_minutes || 0);
       }
-    } catch {}
+    } catch (err) { console.error(err); }
   };
 
   const fetchRewardEvents = async (childId) => {
@@ -270,14 +276,14 @@ export default function App() {
           setTimeout(() => setTriggerConfetti(false), 3500);
         }
       }
-    } catch {}
+    } catch (err) { console.error(err); }
   };
 
   const fetchTaskTemplates = async () => {
     try {
       const res = await apiFetch(`/api/task-templates`);
       if (res.ok) setTaskTemplates(await res.json());
-    } catch {}
+    } catch (err) { console.error(err); }
   };
 
   const fetchTasks = async (childId = '') => {
@@ -285,7 +291,7 @@ export default function App() {
       const query = childId ? `?childId=${childId}` : '';
       const res = await apiFetch(`/api/tasks${query}`);
       if (res.ok) setTasks(await res.json());
-    } catch {}
+    } catch (err) { console.error(err); }
   };
 
   const fetchScreenRequests = async (childId = '') => {
@@ -293,7 +299,7 @@ export default function App() {
       const query = childId ? `?childId=${childId}` : '';
       const res = await apiFetch(`/api/screen-time-requests${query}`);
       if (res.ok) setScreenRequests(await res.json());
-    } catch {}
+    } catch (err) { console.error(err); }
   };
 
   useEffect(() => {
@@ -328,7 +334,7 @@ export default function App() {
           });
         }
       }
-    } catch {}
+    } catch (err) { console.error(err); }
   };
 
   const handleKeyPress = (num) => {
@@ -360,7 +366,8 @@ export default function App() {
         setError(data.error || 'קוד שגוי');
         setPinInput('');
       }
-    } catch {
+    } catch (err) {
+      console.error(err);
       playSound('error');
       setError('בעיית תקשורת בשרת');
       setPinInput('');
@@ -397,7 +404,7 @@ export default function App() {
         setNewTask({ title: '', description: '', rewardMinutes: 15, assignedChildIds: [], scheduleType: 'one_time', requiresPhoto: false });
         fetchTasks(); fetchTaskTemplates();
       }
-    } catch {}
+    } catch (err) { console.error(err); }
   };
 
   const handleTaskSubmit = async (e) => {
@@ -415,7 +422,7 @@ export default function App() {
       } else {
         alert((await res.json()).error);
       }
-    } catch {}
+    } catch (err) { console.error(err); }
   };
 
   const handleApprove = async (instanceId) => {
@@ -559,7 +566,7 @@ export default function App() {
         fetchWallet(currentUser.id);
         fetchRewardEvents(currentUser.id);
       }
-    } catch {}
+    } catch (err) { console.error(err); }
   };
 
   if (pinTarget) {

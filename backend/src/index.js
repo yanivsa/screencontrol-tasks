@@ -126,7 +126,8 @@ async function verifyToken(request, env) {
     const payload = JSON.parse(base64UrlToString(payloadPart));
     if (payload.exp && payload.exp < Date.now()) return null;
     return payload;
-  } catch {
+  } catch (err) {
+    console.error("verifyToken error:", err);
     return null;
   }
 }
@@ -615,7 +616,7 @@ export default {
           const body = await request.json();
           rewardMinutesOverride = body.rewardMinutesOverride;
           reason = body.reason;
-        } catch (e) {}
+        } catch (e) { console.error(e); }
         
         const instance = await env.DB.prepare("SELECT * FROM task_instances WHERE id = ?").bind(instanceId).first();
         if (!instance) return responseError("המשימה לא נמצאה", 404, corsHeaders);
@@ -665,7 +666,7 @@ export default {
           const body = await request.json();
           action = body.action;
           rewardMinutesOverride = body.rewardMinutesOverride;
-        } catch (e) {}
+        } catch (e) { console.error(e); }
         
         const instance = await env.DB.prepare("SELECT * FROM task_instances WHERE id = ?").bind(instanceId).first();
         if (!instance) return responseError("המשימה לא נמצאה", 404, corsHeaders);
@@ -803,7 +804,7 @@ export default {
         try {
           const body = await request.json();
           approvedMinutes = body.approvedMinutes;
-        } catch (e) {}
+        } catch (e) { console.error(e); }
         
         const sr = await env.DB.prepare("SELECT * FROM screen_time_requests WHERE id = ?").bind(reqId).first();
         if (!sr) return responseError("בקשה לא נמצאה", 404, corsHeaders);
