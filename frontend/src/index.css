@@ -34,13 +34,24 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+html {
+  width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
+}
+
 body {
   font-family: var(--font-family);
   background-color: var(--bg-primary);
   color: var(--text-primary);
   direction: rtl;
+  width: 100%;
+  min-width: 0;
   min-height: 100vh;
   overflow-x: hidden;
+  overscroll-behavior-x: none;
+  touch-action: pan-y;
   display: flex;
   justify-content: center;
   align-items: stretch;
@@ -48,7 +59,10 @@ body {
 
 #root {
   width: 100%;
+  min-width: 0;
   max-width: 500px;
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
   display: flex;
   flex-direction: column;
   background-color: var(--bg-primary);
@@ -62,6 +76,9 @@ body {
   display: flex;
   flex-direction: column;
   flex: 1;
+  width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
   padding: var(--safe-area-padding);
   padding-bottom: calc(var(--safe-area-padding) + 96px + env(safe-area-inset-bottom, 0px));
 }
@@ -644,16 +661,19 @@ body {
   flex-direction: column;
   gap: 4px;
   flex: 1;
+  min-width: 0;
 }
 
 .task-title {
   font-size: 1rem;
   font-weight: 700;
+  overflow-wrap: anywhere;
 }
 
 .task-desc {
   font-size: 0.85rem;
   color: var(--text-secondary);
+  overflow-wrap: anywhere;
 }
 
 .task-meta {
@@ -813,10 +833,9 @@ body {
 /* Confetti effect */
 .confetti-canvas {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
   z-index: 9999;
 }
@@ -1109,6 +1128,114 @@ body {
 .notification-body {
   font-size: 0.8rem;
   color: var(--text-secondary);
+}
+
+img,
+video,
+canvas {
+  max-width: 100%;
+}
+
+button,
+input,
+select,
+textarea {
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .user-badge:hover,
+  .profile-card:hover,
+  .btn-secondary:hover,
+  .task-card:hover,
+  .kid-summary-card:hover,
+  .photo-uploader:hover {
+    transform: none;
+  }
+}
+
+@media (max-width: 420px) {
+  :root {
+    --safe-area-padding: 12px;
+    --border-radius-lg: 18px;
+    --border-radius-md: 12px;
+  }
+
+  .app-header {
+    gap: 10px;
+    margin-bottom: 18px;
+  }
+
+  .app-title {
+    min-width: 0;
+    font-size: 1.25rem;
+    overflow-wrap: anywhere;
+  }
+
+  .user-badge {
+    flex: 0 0 auto;
+    padding: 7px 10px;
+  }
+
+  .modal-overlay {
+    align-items: flex-end;
+    padding: 10px;
+  }
+
+  .modal-content {
+    max-height: calc(100dvh - 20px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 22px 16px calc(18px + env(safe-area-inset-bottom, 0px));
+    overscroll-behavior: contain;
+  }
+
+  .modal-content form > div[style*="display: flex"] {
+    flex-wrap: wrap;
+  }
+
+  .modal-content form > div[style*="display: flex"] > * {
+    flex: 1 1 140px;
+    min-width: 0;
+  }
+
+  .task-card,
+  .kid-summary-card,
+  .next-task-card {
+    min-width: 0;
+    gap: 10px;
+  }
+
+  .task-reward,
+  .reward-badge,
+  .status-badge {
+    flex: 0 0 auto;
+  }
+
+  .achievement-row,
+  .reward-progress-grid {
+    gap: 6px;
+  }
+
+  .achievement-chip {
+    padding: 8px 4px;
+  }
+
+  .achievement-chip strong,
+  .achievement-chip small {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .bottom-nav {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .nav-item {
+    min-width: 0;
+  }
 }
 
 /* Device simulation frame for web wrapper aesthetic */
