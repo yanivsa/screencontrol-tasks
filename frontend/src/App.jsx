@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8787';
+const API_BASE = import.meta.env.VITE_API_BASE || 'https://screen-tasks-backend.yanivsa.workers.dev';
 
 function playSound(type) {
   try {
