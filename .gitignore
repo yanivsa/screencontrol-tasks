@@ -29,3 +29,7 @@ frontend/android/.gradle/
 frontend/android/local.properties
 frontend/android/keystore.properties
 frontend/android/release-key.jks
+
+*.env
+.env
+
